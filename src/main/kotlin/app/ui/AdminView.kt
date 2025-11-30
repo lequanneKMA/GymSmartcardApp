@@ -18,8 +18,10 @@ import java.util.*
 fun AdminView(
     member: Member?,
     onShowToast: (String) -> Unit,
+    onCreateCard: (Member, String) -> Boolean,
     onDeleteCard: (String) -> Boolean
 ) {
+    var showCreateCardDialog by remember { mutableStateOf(false) }
 
     Column(
         Modifier.fillMaxSize().padding(20.dp)
@@ -31,6 +33,14 @@ fun AdminView(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text("Quản lý Admin", fontSize = 22.sp, color = Color(0xFFD32F2F))
+            Button(
+                onClick = { showCreateCardDialog = true },
+                colors = ButtonDefaults.buttonColors(
+                    backgroundColor = Color(0xFF4CAF50)
+                )
+            ) {
+                Text("➕ Tạo thẻ mới")
+            }
         }
 
         Spacer(Modifier.height(16.dp))
@@ -222,7 +232,149 @@ fun AdminView(
                 }
             }
         }
+
+        // Dialog tạo thẻ mới
+        if (showCreateCardDialog) {
+            CreateCardDialog(
+                onDismiss = { showCreateCardDialog = false },
+                onCreate = { newMember, initialPin ->
+                    if (onCreateCard(newMember, initialPin)) {
+                        onShowToast("Đã tạo thẻ ${newMember.memberId} thành công!")
+                        showCreateCardDialog = false
+                    } else {
+                        onShowToast("Tạo thẻ thất bại! ID đã tồn tại")
+                    }
+                }
+            )
+        }
     }
 }
 
+/**
+ * Dialog tạo thẻ mới
+ */
+@OptIn(androidx.compose.material.ExperimentalMaterialApi::class)
+@Composable
+private fun CreateCardDialog(
+    onDismiss: () -> Unit,
+    onCreate: (Member, String) -> Unit
+) {
+    var memberId by remember { mutableStateOf("") }
+    var fullName by remember { mutableStateOf("") }
+    var packageType by remember { mutableStateOf("1 Tháng") }
+    var initialPin by remember { mutableStateOf("1234") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text("Tạo thẻ thành viên mới", fontSize = 20.sp)
+        },
+        text = {
+            Column(
+                Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                OutlinedTextField(
+                    value = memberId,
+                    onValueChange = { memberId = it.uppercase() },
+                    label = { Text("ID thẻ (vd: ID12345)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+
+                OutlinedTextField(
+                    value = fullName,
+                    onValueChange = { fullName = it },
+                    label = { Text("Họ và tên") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+
+                // Dropdown gói tập
+                var expanded by remember { mutableStateOf(false) }
+                Box(Modifier.fillMaxWidth()) {
+                    OutlinedTextField(
+                        value = packageType,
+                        onValueChange = { },
+                        label = { Text("Gói tập") },
+                        modifier = Modifier.fillMaxWidth(),
+                        readOnly = true,
+                        trailingIcon = {
+                            TextButton(onClick = { expanded = true }) {
+                                Text("▼")
+                            }
+                        }
+                    )
+
+                    DropdownMenu(
+                        expanded = expanded,
+                        onDismissRequest = { expanded = false }
+                    ) {
+                        listOf("1 Tháng", "3 Tháng", "6 Tháng", "1 Năm").forEach { option ->
+                            DropdownMenuItem(onClick = {
+                                packageType = option
+                                expanded = false
+                            }) {
+                                Text(option)
+                            }
+                        }
+                    }
+                }
+
+                OutlinedTextField(
+                    value = initialPin,
+                    onValueChange = {
+                        if (it.length <= 4 && it.all { char -> char.isDigit() }) {
+                            initialPin = it
+                        }
+                    },
+                    label = { Text("Mã PIN ban đầu (4 số)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+
+                Text(
+                    "⚠️ Thẻ sẽ được tạo với số dư ban đầu 0đ. Admin có thể nạp tiền sau.",
+                    fontSize = 12.sp,
+                    color = Color.Gray
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (memberId.isNotEmpty() && fullName.isNotEmpty() && initialPin.length == 4) {
+                        val startDate = java.time.LocalDate.now()
+                        val expireDate = startDate.plusMonths(when(packageType) {
+                            "1 Tháng" -> 1
+                            "3 Tháng" -> 3
+                            "6 Tháng" -> 6
+                            "1 Năm" -> 12
+                            else -> 1
+                        }.toLong())
+
+                        val newMember = Member(
+                            memberId = memberId,
+                            fullName = fullName,
+                            startDate = startDate,
+                            expireDate = expireDate,
+                            packageType = packageType,
+                            balance = 0L
+                        )
+
+                        onCreate(newMember, initialPin)
+                    }
+                },
+                enabled = memberId.isNotEmpty() && fullName.isNotEmpty() && initialPin.length == 4
+            ) {
+                Text("Tạo thẻ")
+            }
+        },
+        dismissButton = {
+            OutlinedButton(onClick = onDismiss) {
+                Text("Hủy")
+            }
+        }
+    )
+}
 

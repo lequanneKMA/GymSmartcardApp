@@ -261,6 +261,13 @@ fun MainWindow(state: AppState) {
                             Role.ADMIN -> AdminView(
                                 member = state.scannedMember,
                                 onShowToast = { message -> state.toast = message },
+                                onCreateCard = { member, pin ->
+                                    val result = state.cardService.createCard(member, pin)
+                                    if (result) {
+                                        state.refreshAvailableCards()
+                                    }
+                                    result
+                                },
                                 onDeleteCard = { memberId ->
                                     val result = state.cardService.deleteCard(memberId)
                                     if (result) {
@@ -622,6 +629,13 @@ fun main() = application {
                                 Role.ADMIN -> AdminView(
                                     member = state.scannedMember,
                                     onShowToast = { message -> state.toast = message },
+                                    onCreateCard = { member, pin ->
+                                        val result = state.cardService.createCard(member, pin)
+                                        if (result) {
+                                            state.refreshAvailableCards()
+                                        }
+                                        result
+                                    },
                                     onDeleteCard = { memberId ->
                                         val result = state.cardService.deleteCard(memberId)
                                         if (result) {
