@@ -16,7 +16,8 @@ private val moneyFormatter = DecimalFormat("#,###")
 
 class AppState(val cardService: SmartcardService = JCardSimService()) {
     var currentRole by mutableStateOf(Role.STAFF)
-    var scannedMember by mutableStateOf<Member?>(null)
+    var scannedMember by mutableStateOf<Member?>(null)  // For Customer view (after PIN verified)
+    var adminScannedMember by mutableStateOf<Member?>(null)  // For Admin view only
     var toast by mutableStateOf<String?>(null)
     var pendingTransaction by mutableStateOf<Transaction?>(null)
     val cart = mutableStateListOf<CartItem>()
@@ -28,6 +29,7 @@ class AppState(val cardService: SmartcardService = JCardSimService()) {
     // Card reader state
     var availableCards by mutableStateOf<List<String>>(emptyList())
     var insertedCardId by mutableStateOf<String?>(null)
+    var selectedCardForInsert by mutableStateOf<String?>(null)
     
     // PIN request state (for customer view)
     var pinRequestActive by mutableStateOf(false)
@@ -37,9 +39,49 @@ class AppState(val cardService: SmartcardService = JCardSimService()) {
     // Temporary storage for scanned member (before PIN verification)
     var tempScannedMember by mutableStateOf<Member?>(null)
     var verifiedPin by mutableStateOf<String?>(null)
+    
+    // Card lock tracking
+    private val lockedCards = mutableSetOf<String>()
+    
+    // PIN Verification Manager
+    val pinVerificationManager = PinVerificationManager(
+        cardService = cardService,
+        onCardLocked = { memberId -> lockCard(memberId) },
+        isCardLocked = { memberId -> isCardLocked(memberId) },
+        onCardLockedClearData = {
+            // Clear customer view when card is locked
+            scannedMember = null
+            tempScannedMember = null
+            verifiedPin = null
+            pinRequestActive = false
+        }
+    )
 
     init {
         refreshAvailableCards()
+    }
+    
+    fun isCardLocked(memberId: String): Boolean {
+        return lockedCards.contains(memberId)
+    }
+    
+    fun lockCard(memberId: String) {
+        lockedCards.add(memberId)
+    }
+    
+    fun unlockCard(memberId: String) {
+        lockedCards.remove(memberId)
+        // Reset PIN attempts when unlocking
+        pinVerificationManager.resetAttempts(memberId)
+        if (tempScannedMember?.memberId == memberId) {
+            pinAttemptsLeft = 3
+        }
+        
+        // Tự động eject card để reset trạng thái PIN trên applet
+        if (insertedCardId == memberId) {
+            ejectCard()
+            toast = "Đã mở khóa và rút thẻ - Vui lòng cắm lại thẻ để sử dụng"
+        }
     }
 
     fun refreshAvailableCards() {
@@ -59,10 +101,28 @@ class AppState(val cardService: SmartcardService = JCardSimService()) {
         if (cardService.ejectCard()) {
             insertedCardId = null
             scannedMember = null
+            adminScannedMember = null
             toast = "Đã rút thẻ"
         }
     }
 
+    // Admin scan - bypass PIN verification
+    fun adminScan() {
+        val m = cardService.readCardData()
+        if (m != null) {
+            // Admin có quyền truy cập trực tiếp, không cần PIN
+            adminScannedMember = m
+            scannedMember = null  // Clear customer view
+            tempScannedMember = null
+            verifiedPin = null
+            pinRequestActive = false
+            toast = "Admin đã quét thẻ: ${m.memberId}"
+        } else {
+            toast = "Không có thẻ nào được cắm"
+        }
+    }
+    
+    // Staff scan - requires customer PIN verification
     fun scan() {
         val m = cardService.readCardData()
         if (m != null) {
@@ -71,9 +131,11 @@ class AppState(val cardService: SmartcardService = JCardSimService()) {
             scannedMember = null // Chưa set member
             verifiedPin = null
             
+            // Lấy số lần thử còn lại của thẻ này từ PIN manager
+            pinAttemptsLeft = pinVerificationManager.getAttemptsLeft(m.memberId)
+            
             // Kích hoạt yêu cầu nhập PIN ở màn hình khách hàng
             pinRequestActive = true
-            pinAttemptsLeft = 3
             pinRequestReason = "Nhân viên yêu cầu xác thực thẻ"
             toast = "Đã quét thẻ: ${m.memberId} - Vui lòng khách hàng nhập mã PIN"
         } else {
@@ -84,34 +146,42 @@ class AppState(val cardService: SmartcardService = JCardSimService()) {
     fun verifyCardPin(pin: String): Boolean {
         val member = tempScannedMember ?: return false
         
-        // Verify PIN with card service
-        val verified = cardService.verifyPin(member.memberId, pin)
-        
-        if (verified) {
-            // PIN đúng, hiển thị thông tin khách hàng
-            scannedMember = member
-            verifiedPin = pin
-            pinRequestActive = false
-            tempScannedMember = null
-            toast = "Xác thực thành công - Chào mừng ${member.fullName}"
-            return true
-        } else {
-            // PIN sai, giảm số lần thử
-            pinAttemptsLeft--
-            if (pinAttemptsLeft <= 0) {
-                // Hết lượt thử, xóa thông tin
+        // Use PIN verification manager
+        pinVerificationManager.startVerification(
+            memberId = member.memberId,
+            reason = "Xác thực thẻ",
+            onSuccess = { verifiedPinValue ->
+                // PIN đúng, hiển thị thông tin khách hàng
+                scannedMember = member
+                verifiedPin = verifiedPinValue
                 pinRequestActive = false
                 tempScannedMember = null
-                toast = "Xác thực thất bại - Đã hết lượt thử"
-            } else {
-                toast = "Mã PIN sai - Còn $pinAttemptsLeft lượt thử"
+                pinAttemptsLeft = 3
+                toast = "Xác thực thành công - Chào mừng ${member.fullName}"
+            },
+            onFailure = {
+                // Xác thực thất bại hoặc thẻ bị khóa
+                pinRequestActive = false
+                tempScannedMember = null
+                toast = pinVerificationManager.lastError ?: "Xác thực thất bại"
             }
-            return false
+        )
+        
+        // Verify the PIN
+        val verified = pinVerificationManager.verifyPin(pin)
+        
+        // Update UI state
+        if (!verified && pinVerificationManager.attemptsLeft > 0) {
+            pinAttemptsLeft = pinVerificationManager.attemptsLeft
+            toast = pinVerificationManager.lastError ?: "Mã PIN không đúng"
         }
+        
+        return verified
     }
 
     fun clear() {
         scannedMember = null
+        adminScannedMember = null
         tempScannedMember = null
         verifiedPin = null
         pinRequestActive = false

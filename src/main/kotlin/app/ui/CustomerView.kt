@@ -24,6 +24,7 @@ private val moneyFormatter = DecimalFormat("#,###")
 @Composable
 fun CustomerView(
     member: Member?,
+    state: app.state.AppState,
     pendingTransaction: Transaction?,
     cart: List<app.model.CartItem>,
     cartTotal: Double,
@@ -203,6 +204,7 @@ fun CustomerView(
                         showPackageDialog -> {
                             PackageDialogContent(
                                 member = member,
+                                state = state,
                                 onCreateTransaction = onCreateTransaction,
                                 onDismiss = { showPackageDialog = false }
                             )
@@ -210,6 +212,7 @@ fun CustomerView(
                         showStoreDialog -> {
                             StoreDialogContent(
                                 member = member,
+                                state = state,
                                 cart = cart,
                                 cartTotal = cartTotal,
                                 onAddToCart = onAddToCart,
@@ -435,7 +438,8 @@ fun CustomerView(
                                     verifyPin = ""
                                     verifyError = ""
                                 } else {
-                                    verifyError = "❌ Mã PIN không đúng! Còn ${pinAttemptsLeft} lần thử"
+                                    // pinAttemptsLeft đã được giảm bởi onVerifyPin()
+                                    verifyError = "Mã PIN không đúng"
                                     verifyPin = ""
                                     
                                     if (pinAttemptsLeft <= 0) {
@@ -477,6 +481,7 @@ fun CustomerView(
 @Composable
 fun PackageDialogContent(
     member: Member,
+    state: app.state.AppState,
     onCreateTransaction: (Transaction) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -521,15 +526,25 @@ fun PackageDialogContent(
                             Modifier
                                 .fillMaxWidth()
                                 .clickable {
-                                    onCreateTransaction(
-                                        Transaction(
-                                            TransactionType.EXTEND_PACKAGE,
-                                            price,
-                                            packageName,
-                                            member.memberId
-                                        )
+                                    // Yêu cầu xác thực PIN trước khi gia hạn
+                                    state.pinVerificationManager.startVerification(
+                                        memberId = member.memberId,
+                                        reason = "Gia hạn $packageName - ${moneyFormatter.format(price.toLong())} đ",
+                                        onSuccess = { pin ->
+                                            onCreateTransaction(
+                                                Transaction(
+                                                    TransactionType.EXTEND_PACKAGE,
+                                                    price,
+                                                    packageName,
+                                                    member.memberId
+                                                )
+                                            )
+                                            onDismiss()
+                                        },
+                                        onFailure = {
+                                            // Hủy giao dịch
+                                        }
                                     )
-                                    onDismiss()
                                 }
                                 .padding(14.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -551,11 +566,18 @@ fun PackageDialogContent(
             }
         }
     }
+    
+    // PIN Verification Dialog
+    PinVerificationDialog(
+        manager = state.pinVerificationManager,
+        title = "Xác nhận gia hạn gói tập"
+    )
 }
 
 @Composable
 fun StoreDialogContent(
     member: Member,
+    state: app.state.AppState,
     cart: List<app.model.CartItem>,
     cartTotal: Double,
     onAddToCart: (app.model.CartItem) -> Unit,
@@ -775,15 +797,25 @@ fun StoreDialogContent(
                     Button(
                         onClick = {
                             val itemsList = cart.joinToString(", ") { "${it.name} x${it.quantity}" }
-                            onCreateTransaction(
-                                Transaction(
-                                    TransactionType.PURCHASE,
-                                    cartTotal,
-                                    "Mua đồ: $itemsList",
-                                    member.memberId
-                                )
+                            // Yêu cầu xác thực PIN trước khi thanh toán
+                            state.pinVerificationManager.startVerification(
+                                memberId = member.memberId,
+                                reason = "Thanh toán ${moneyFormatter.format(cartTotal.toLong())} đ",
+                                onSuccess = { pin ->
+                                    onCreateTransaction(
+                                        Transaction(
+                                            TransactionType.PURCHASE,
+                                            cartTotal,
+                                            "Mua đồ: $itemsList",
+                                            member.memberId
+                                        )
+                                    )
+                                    onDismiss()
+                                },
+                                onFailure = {
+                                    // Hủy thanh toán
+                                }
                             )
-                            onDismiss()
                         },
                         modifier = Modifier.weight(1f).height(44.dp),
                         colors = ButtonDefaults.buttonColors(
@@ -803,6 +835,12 @@ fun StoreDialogContent(
             }
         }
     }
+    
+    // PIN Verification Dialog
+    PinVerificationDialog(
+        manager = state.pinVerificationManager,
+        title = "Xác nhận thanh toán"
+    )
 }
 
 @Composable

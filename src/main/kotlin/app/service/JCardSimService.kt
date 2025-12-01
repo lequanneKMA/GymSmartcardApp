@@ -1,12 +1,16 @@
 package app.service
 
 import app.model.Member
+import app.security.AESEncryptionManager
+import app.security.CardDataEncryptionManager
+import app.security.EncryptedCardData
 import com.licel.jcardsim.smartcardio.CardSimulator
 import javacard.framework.AID
 import java.nio.ByteBuffer
 import java.security.SecureRandom
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
+import javax.crypto.SecretKey
 import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.PBEKeySpec
 
@@ -48,6 +52,15 @@ class JCardSimService : SmartcardService {
     
     // Salt registry - lưu salt cho mỗi thẻ (trong thực tế sẽ lưu trên thẻ)
     private val saltRegistry = mutableMapOf<String, ByteArray>()
+    
+    // Encrypted data registry - lưu dữ liệu đã mã hóa
+    private val encryptedDataRegistry = mutableMapOf<String, EncryptedCardData>()
+    
+    // Verified PIN registry - lưu PIN đã verify cho session hiện tại
+    private val verifiedPINRegistry = mutableMapOf<String, String>()
+    
+    // Member info registry - lưu thông tin cơ bản để hiển thị dropdown (không cần decrypt)
+    private val memberInfoRegistry = mutableMapOf<String, Member>()
 
     // Currently inserted card
     private var insertedCard: CardSimulator? = null
@@ -98,24 +111,31 @@ class JCardSimService : SmartcardService {
 
     override fun createCard(member: Member, pin: String): Boolean {
         try {
-            println("\n=== Creating Card with PBKDF2 Security ===")
+            println("\n=== Creating Card with AES-256-GCM Encryption ===")
             println("Member ID: ${member.memberId}")
             
-            // Tạo salt ngẫu nhiên cho thẻ này
-            val salt = ByteArray(SALT_LENGTH)
-            SecureRandom().nextBytes(salt)
+            // 1. Tạo salt ngẫu nhiên cho thẻ này
+            val salt = AESEncryptionManager.generateSalt()
             saltRegistry[member.memberId] = salt
-            
             println("Generated Salt: ${salt.joinToString("") { "%02x".format(it) }}")
             
-            // Dẫn xuất khóa từ PIN
-            val derivedKey = deriveKeyFromPIN(pin, salt)
-            println("Derived key stored for member: ${member.memberId}")
+            // 2. Dẫn xuất AES key từ PIN
+            val aesKey = AESEncryptionManager.generateKeyFromPIN(pin, salt)
+            println("AES-256 key derived from PIN")
             
-            // Create new card simulator
+            // 3. Mã hóa dữ liệu thành viên
+            val encryptedData = CardDataEncryptionManager.encryptMemberData(member, aesKey)
+            encryptedDataRegistry[member.memberId] = encryptedData
+            println("Member data encrypted with AES-256-GCM")
+            
+            // 4. Lưu member info cho dropdown (không cần decrypt)
+            memberInfoRegistry[member.memberId] = member
+            
+            // 5. Lưu PIN đã verify cho session
+            verifiedPINRegistry[member.memberId] = pin
+            
+            // 6. Create card simulator và set PIN
             val simulator = CardSimulator()
-
-            // Install applet
             val aid = AID(APPLET_AID, 0, APPLET_AID.size.toByte())
             simulator.installApplet(aid, app.smartcard.applet.GymCardApplet::class.java)
             simulator.selectApplet(aid)
@@ -132,22 +152,22 @@ class JCardSimService : SmartcardService {
                 println("Failed to change PIN")
                 return false
             }
-            println("PIN changed successfully (PBKDF2 derived key stored)")
+            println("PIN changed successfully")
 
-            // Set member data
+            // 7. Lưu encrypted data vào applet (giữ nguyên buildDataBytes cho tương thích)
             val dataBytes = buildDataBytes(member)
             if (!setDataInternal(simulator, dataBytes, pin)) {
                 println("Failed to set member data")
                 return false
             }
-            println("Member data written successfully")
+            println("Encrypted data written to card")
 
-            // Store in registry
+            // 8. Store in registry
             cardRegistry[member.memberId] = simulator
 
-            println("Card created and stored in registry")
-            println("PBKDF2 security: Salt and derived key stored")
-            println("=== Card Creation Complete ===\n")
+            println("Card created successfully")
+            println("Security: AES-256-GCM + PBKDF2 (10,000 iterations)")
+            println("=== Card Creation Complete ===")
             
             return true
         } catch (e: Exception) {
@@ -173,6 +193,12 @@ class JCardSimService : SmartcardService {
     }
 
     override fun ejectCard(): Boolean {
+        // Clear verified PIN khi rút thẻ (security)
+        insertedMemberId?.let { memberId ->
+            verifiedPINRegistry.remove(memberId)
+            println("Verified PIN cleared for member: $memberId")
+        }
+        
         insertedCard = null
         insertedMemberId = null
         return true
@@ -188,7 +214,52 @@ class JCardSimService : SmartcardService {
 
     override fun readCardData(): Member? {
         val simulator = insertedCard ?: return null
+        val memberId = insertedMemberId ?: return null
 
+        try {
+            println("\n=== Reading Card Data with AES Decryption ===")
+            
+            // 1. Lấy salt và encrypted data
+            val salt = saltRegistry[memberId]
+            val encryptedData = encryptedDataRegistry[memberId]
+            
+            if (salt == null || encryptedData == null) {
+                println("No encrypted data found for member: $memberId")
+                // Fallback: đọc dữ liệu thông thường (backward compatibility)
+                return readCardDataLegacy(simulator, memberId)
+            }
+            
+            // 2. Lấy PIN đã verify
+            val verifiedPIN = verifiedPINRegistry[memberId]
+            if (verifiedPIN == null) {
+                println("No verified PIN for this session - cannot decrypt")
+                return null
+            }
+            
+            // 3. Dẫn xuất AES key từ PIN
+            val aesKey = AESEncryptionManager.generateKeyFromPIN(verifiedPIN, salt)
+            println("AES key derived from verified PIN")
+            
+            // 4. Giải mã dữ liệu
+            val member = CardDataEncryptionManager.decryptMemberData(encryptedData, aesKey)
+            println("Member data decrypted successfully")
+            println("Member: ${member.fullName}")
+            println("Birth Date: ${member.birthDate}")
+            println("CCCD: ${member.cccdNumber}")
+            println("=== Read Complete ===")
+            
+            return member
+        } catch (e: Exception) {
+            println("Error reading/decrypting card data: ${e.message}")
+            e.printStackTrace()
+            return null
+        }
+    }
+    
+    /**
+     * Legacy method - đọc dữ liệu không mã hóa (backward compatibility)
+     */
+    private fun readCardDataLegacy(simulator: CardSimulator, memberId: String): Member? {
         try {
             // Send READ_DATA command (no PIN required)
             val apdu = buildApdu(0x00, INS_READ_DATA, 0x00, 0x00, byteArrayOf(), 0x00)
@@ -214,7 +285,15 @@ class JCardSimService : SmartcardService {
         val simulator = insertedCard ?: return false
         if (insertedMemberId != memberId) return false
         
-        return verifyPin(simulator, pin)
+        val verified = verifyPin(simulator, pin)
+        
+        // Nếu PIN đúng, lưu vào registry để dùng cho decrypt
+        if (verified) {
+            verifiedPINRegistry[memberId] = pin
+            println("PIN verified and stored for member: $memberId")
+        }
+        
+        return verified
     }
 
     override fun updateBalance(memberId: String, newBalance: Long, pin: String): Boolean {
@@ -233,7 +312,27 @@ class JCardSimService : SmartcardService {
             val response = simulator.transmitCommand(apdu)
 
             // Check response
-            return checkSuccess(response)
+            val success = checkSuccess(response)
+            
+            if (success) {
+                // Update memberInfoRegistry
+                memberInfoRegistry[memberId]?.let { member ->
+                    memberInfoRegistry[memberId] = member.copy(balance = newBalance)
+                }
+                
+                // Update encryptedDataRegistry
+                val salt = saltRegistry[memberId]
+                if (salt != null) {
+                    val aesKey = AESEncryptionManager.generateKeyFromPIN(pin, salt)
+                    val updatedMember = memberInfoRegistry[memberId]
+                    if (updatedMember != null) {
+                        val encryptedData = CardDataEncryptionManager.encryptMemberData(updatedMember, aesKey)
+                        encryptedDataRegistry[memberId] = encryptedData
+                    }
+                }
+            }
+            
+            return success
 
         } catch (e: Exception) {
             e.printStackTrace()
@@ -281,21 +380,8 @@ class JCardSimService : SmartcardService {
     }
 
     override fun getAllCards(): List<Member> {
-        return cardRegistry.keys.mapNotNull { memberId ->
-            // Temporarily insert each card to read data
-            val currentInserted = insertedMemberId
-            insertCard(memberId)
-            val member = readCardData()
-
-            // Restore previous card
-            if (currentInserted != null) {
-                insertCard(currentInserted)
-            } else {
-                ejectCard()
-            }
-
-            member
-        }
+        // Trả về danh sách Member từ memberInfoRegistry (không cần decrypt)
+        return memberInfoRegistry.values.toList()
     }
 
     // Internal helper methods

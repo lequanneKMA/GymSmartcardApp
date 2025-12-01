@@ -19,7 +19,10 @@ fun AdminView(
     member: Member?,
     onShowToast: (String) -> Unit,
     onCreateCard: (Member, String) -> Boolean,
-    onDeleteCard: (String) -> Boolean
+    onDeleteCard: (String) -> Boolean,
+    onScan: () -> Unit,
+    isCardLocked: (String) -> Boolean = { false },
+    onUnlockCard: (String) -> Unit = {}
 ) {
     var showCreateCardDialog by remember { mutableStateOf(false) }
 
@@ -33,13 +36,23 @@ fun AdminView(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text("Quản lý Admin", fontSize = 22.sp, color = Color(0xFFD32F2F))
-            Button(
-                onClick = { showCreateCardDialog = true },
-                colors = ButtonDefaults.buttonColors(
-                    backgroundColor = Color(0xFF4CAF50)
-                )
-            ) {
-                Text("➕ Tạo thẻ mới")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = onScan,
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = Color(0xFF2E7D32)
+                    )
+                ) {
+                    Text("📇 Quét thẻ")
+                }
+                Button(
+                    onClick = { showCreateCardDialog = true },
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = Color(0xFF4CAF50)
+                    )
+                ) {
+                    Text("➕ Tạo thẻ mới")
+                }
             }
         }
 
@@ -198,6 +211,58 @@ fun AdminView(
                                 enabled = pin.length == 4
                             ) {
                                 Text("Đặt mã PIN mới", color = Color.White)
+                            }
+                        }
+                    }
+                }
+
+                // Trạng thái khóa thẻ
+                val cardLocked = member?.let { isCardLocked(it.memberId) } ?: false
+                if (cardLocked) {
+                    Card(
+                        Modifier.fillMaxWidth(),
+                        elevation = 4.dp,
+                        backgroundColor = Color(0xFFFFF3E0)
+                    ) {
+                        Column(Modifier.padding(16.dp)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(bottom = 12.dp)
+                            ) {
+                                Text("🔒", fontSize = 24.sp)
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    "Thẻ đã bị khóa",
+                                    fontSize = 18.sp,
+                                    color = Color(0xFFE65100)
+                                )
+                            }
+
+                            Text(
+                                "Thẻ này đã bị khóa do nhập sai mã PIN 3 lần liên tiếp.",
+                                fontSize = 14.sp,
+                                color = Color(0xFF424242),
+                                modifier = Modifier.padding(bottom = 8.dp)
+                            )
+                            
+                            Text(
+                                "⚠️ Lưu ý: Thẻ bị khóa trên applet, cần rút thẻ và cắm lại để reset trạng thái.",
+                                fontSize = 12.sp,
+                                color = Color(0xFFD84315),
+                                modifier = Modifier.padding(bottom = 16.dp)
+                            )
+
+                            Button(
+                                onClick = {
+                                    onUnlockCard(member.memberId)
+                                    onShowToast("Đã mở khóa thẻ ${member.memberId} - Vui lòng rút thẻ và cắm lại")
+                                },
+                                modifier = Modifier.fillMaxWidth().height(48.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    backgroundColor = Color(0xFFFF6F00)
+                                )
+                            ) {
+                                Text("🔓 Mở khóa & Rút thẻ", color = Color.White)
                             }
                         }
                     }

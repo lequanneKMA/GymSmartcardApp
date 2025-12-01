@@ -52,7 +52,7 @@ fun RoleSwitcher(currentRole: Role, onChange: (Role) -> Unit) {
                     contentColor = if (currentRole == Role.CUSTOMER) Color.White else Color(0xFF757575)
                 )
             ) {
-                Text("Khách hàng", fontSize = 13.sp)
+                Text("Khách", fontSize = 13.sp)
             }
         }
     }
