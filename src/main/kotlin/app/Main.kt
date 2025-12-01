@@ -93,7 +93,7 @@ fun MainWindow(state: AppState) {
                                     if (state.currentRole == Role.ADMIN) {
                                         MenuItem("• Tạo thành viên mới")
                                         MenuItem("• Quản lý thành viên")
-                                        MenuItem("• Đặt lại mã PIN")
+                                        MenuItem("• Quản lý hàng hóa")
                                         MenuItem("• Báo cáo thống kê")
                                     } else {
                                         MenuItem("• Check-in/out")
@@ -140,7 +140,7 @@ fun MainWindow(state: AppState) {
                         ) {
                             Column(Modifier.padding(16.dp)) {
                                 Text(
-                                    "🔌 Đầu đọc thẻ ảo",
+                                    "🔌 Đầu đọc thẻ",
                                     fontSize = 14.sp,
                                     color = Color(0xFFE65100),
                                     modifier = Modifier.padding(bottom = 8.dp)
