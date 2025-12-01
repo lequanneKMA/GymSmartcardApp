@@ -1,4 +1,4 @@
-package app.ui
+package app.ui.customer
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
@@ -17,6 +17,11 @@ import androidx.compose.ui.unit.sp
 import app.model.Member
 import app.model.Transaction
 import app.model.TransactionType
+import app.model.CartItem
+import app.core.state.AppState
+import app.core.smartcard.SmartcardService
+import app.ui.shared.MemberInfoCard
+import app.ui.dialog.PinVerificationDialog
 import java.text.DecimalFormat
 
 private val moneyFormatter = DecimalFormat("#,###")
@@ -24,12 +29,12 @@ private val moneyFormatter = DecimalFormat("#,###")
 @Composable
 fun CustomerView(
     member: Member?,
-    state: app.state.AppState,
+    state: AppState,
     pendingTransaction: Transaction?,
-    cart: List<app.model.CartItem>,
+    cart: List<CartItem>,
     cartTotal: Double,
-    onAddToCart: (app.model.CartItem) -> Unit,
-    onRemoveFromCart: (app.model.CartItem) -> Unit,
+    onAddToCart: (CartItem) -> Unit,
+    onRemoveFromCart: (CartItem) -> Unit,
     onClearCart: () -> Unit,
     onCreateTransaction: (Transaction) -> Unit,
     onConfirm: () -> Unit,
@@ -41,7 +46,7 @@ fun CustomerView(
     tempScannedMember: Member? = null,
     onVerifyPin: (String) -> Boolean = { false },
     onPinCancelled: () -> Unit = {},
-    cardService: app.service.SmartcardService? = null
+    cardService: SmartcardService? = null
 ) {
     // PIN verification dialog state (must be outside member null check)
     var showPinVerifyDialog by remember { mutableStateOf(false) }
@@ -481,7 +486,7 @@ fun CustomerView(
 @Composable
 fun PackageDialogContent(
     member: Member,
-    state: app.state.AppState,
+    state: AppState,
     onCreateTransaction: (Transaction) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -577,11 +582,11 @@ fun PackageDialogContent(
 @Composable
 fun StoreDialogContent(
     member: Member,
-    state: app.state.AppState,
-    cart: List<app.model.CartItem>,
+    state: AppState,
+    cart: List<CartItem>,
     cartTotal: Double,
-    onAddToCart: (app.model.CartItem) -> Unit,
-    onRemoveFromCart: (app.model.CartItem) -> Unit,
+    onAddToCart: (CartItem) -> Unit,
+    onRemoveFromCart: (CartItem) -> Unit,
     onClearCart: () -> Unit,
     onCreateTransaction: (Transaction) -> Unit,
     onDismiss: () -> Unit

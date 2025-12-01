@@ -1,5 +1,7 @@
-package app.ui
+package app.ui.admin
 
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -8,10 +10,18 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.model.Member
+import app.manager.photo.PhotoManager
+import app.util.toImageBitmap
+import java.awt.FileDialog
+import java.awt.Frame
+import java.io.File
 import java.text.SimpleDateFormat
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 import java.util.*
 
 @Composable
@@ -75,6 +85,11 @@ fun AdminView(
             var balance by remember { mutableStateOf(member.balance.toString()) }
             var pin by remember { mutableStateOf("") }
             var showPinField by remember { mutableStateOf(false) }
+            
+            // Load ảnh nếu có
+            val memberPhoto = remember(member.photoPath) {
+                PhotoManager.loadPhoto(member.photoPath)
+            }
 
             Column(
                 Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
@@ -89,7 +104,66 @@ fun AdminView(
                         Text("Thông tin thành viên", fontSize = 18.sp, color = Color(0xFF212121))
                         Spacer(Modifier.height(12.dp))
 
-                        Text("ID: ${member.memberId}", fontSize = 14.sp, color = Color.Gray)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            // Left column - Photo
+                            Column(
+                                modifier = Modifier.width(120.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(120.dp)
+                                        .border(2.dp, Color(0xFF2196F3)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (memberPhoto != null) {
+                                        Image(
+                                            bitmap = memberPhoto.toImageBitmap(),
+                                            contentDescription = "Member photo",
+                                            modifier = Modifier.fillMaxSize()
+                                        )
+                                    } else {
+                                        Text("Chưa có ảnh", fontSize = 11.sp, color = Color.Gray)
+                                    }
+                                }
+                                
+                                if (member.photoPath != null) {
+                                    Text(
+                                        "✓ Đã có ảnh",
+                                        fontSize = 11.sp,
+                                        color = Color(0xFF4CAF50),
+                                        modifier = Modifier.padding(top = 4.dp)
+                                    )
+                                }
+                            }
+
+                            // Right column - Info
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text("ID: ${member.memberId}", fontSize = 14.sp, color = Color.Gray)
+                                
+                                member.birthDate?.let { birthDate ->
+                                    Text(
+                                        "Ngày sinh: ${birthDate.format(DateTimeFormatter.ofPattern("dd/MM/yyyy"))}",
+                                        fontSize = 14.sp,
+                                        color = Color(0xFF424242)
+                                    )
+                                }
+                                
+                                if (member.cccdNumber != null) {
+                                    Text(
+                                        "CCCD: ${member.cccdNumber}",
+                                        fontSize = 14.sp,
+                                        color = Color(0xFF424242)
+                                    )
+                                }
+                            }
+                        }
 
                         Spacer(Modifier.height(12.dp))
 
@@ -316,7 +390,7 @@ fun AdminView(
 }
 
 /**
- * Dialog tạo thẻ mới
+ * Dialog tạo thẻ mới với đầy đủ thông tin
  */
 @OptIn(androidx.compose.material.ExperimentalMaterialApi::class)
 @Composable
@@ -326,8 +400,12 @@ private fun CreateCardDialog(
 ) {
     var memberId by remember { mutableStateOf("") }
     var fullName by remember { mutableStateOf("") }
+    var birthDate by remember { mutableStateOf("") }  // Format: dd/MM/yyyy
+    var cccdNumber by remember { mutableStateOf("") }
     var packageType by remember { mutableStateOf("1 Tháng") }
     var initialPin by remember { mutableStateOf("1234") }
+    var photoPath by remember { mutableStateOf<String?>(null) }
+    var photoPreview by remember { mutableStateOf<java.awt.image.BufferedImage?>(null) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -336,7 +414,7 @@ private fun CreateCardDialog(
         },
         text = {
             Column(
-                Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                Modifier.fillMaxWidth().height(550.dp).verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 OutlinedTextField(
@@ -351,6 +429,34 @@ private fun CreateCardDialog(
                     value = fullName,
                     onValueChange = { fullName = it },
                     label = { Text("Họ và tên") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+
+                OutlinedTextField(
+                    value = birthDate,
+                    onValueChange = { 
+                        // Only allow digits and /
+                        if (it.length <= 10 && it.all { char -> char.isDigit() || char == '/' }) {
+                            birthDate = it
+                        }
+                    },
+                    label = { Text("Ngày sinh (dd/MM/yyyy)") },
+                    placeholder = { Text("01/01/1990") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+
+                OutlinedTextField(
+                    value = cccdNumber,
+                    onValueChange = { 
+                        // Only allow digits, max 12
+                        if (it.length <= 12 && it.all { char -> char.isDigit() }) {
+                            cccdNumber = it
+                        }
+                    },
+                    label = { Text("Số CCCD (12 số)") },
+                    placeholder = { Text("001234567890") },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true
                 )
@@ -398,6 +504,94 @@ private fun CreateCardDialog(
                     singleLine = true
                 )
 
+                // Photo section
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    elevation = 2.dp,
+                    backgroundColor = Color(0xFFF5F5F5)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text("Ảnh thành viên", fontSize = 14.sp, color = Color(0xFF424242))
+                        
+                        // Photo preview
+                        if (photoPreview != null) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(150.dp)
+                                    .border(1.dp, Color.Gray),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Image(
+                                    bitmap = photoPreview!!.toImageBitmap(),
+                                    contentDescription = "Photo preview",
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            }
+                        } else {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(150.dp)
+                                    .border(1.dp, Color.Gray),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("Chưa chọn ảnh", color = Color.Gray)
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                onClick = {
+                                    // Open file picker
+                                    val fileDialog = FileDialog(Frame(), "Chọn ảnh", FileDialog.LOAD)
+                                    fileDialog.setFilenameFilter { _, name -> 
+                                        name.lowercase().endsWith(".jpg") || 
+                                        name.lowercase().endsWith(".jpeg") || 
+                                        name.lowercase().endsWith(".png") ||
+                                        name.lowercase().endsWith(".bmp")
+                                    }
+                                    fileDialog.isVisible = true
+                                    
+                                    val selectedFile = fileDialog.file
+                                    val selectedDir = fileDialog.directory
+                                    
+                                    if (selectedFile != null && selectedDir != null) {
+                                        val file = File(selectedDir, selectedFile)
+                                        photoPreview = PhotoManager.loadPhoto(file.absolutePath)
+                                        // Don't save yet, will save when creating card
+                                        photoPath = file.absolutePath
+                                    }
+                                },
+                                modifier = Modifier.weight(1f),
+                                colors = ButtonDefaults.buttonColors(
+                                    backgroundColor = Color(0xFF2196F3)
+                                )
+                            ) {
+                                Text("📁 Chọn ảnh", color = Color.White, fontSize = 12.sp)
+                            }
+
+                            if (photoPath != null) {
+                                OutlinedButton(
+                                    onClick = {
+                                        photoPath = null
+                                        photoPreview = null
+                                    },
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text("🗑️ Xóa", fontSize = 12.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+
                 Text(
                     "⚠️ Thẻ sẽ được tạo với số dư ban đầu 0đ. Admin có thể nạp tiền sau.",
                     fontSize = 12.sp,
@@ -409,7 +603,24 @@ private fun CreateCardDialog(
             Button(
                 onClick = {
                     if (memberId.isNotEmpty() && fullName.isNotEmpty() && initialPin.length == 4) {
-                        val startDate = java.time.LocalDate.now()
+                        // Parse birth date
+                        val parsedBirthDate = if (birthDate.isNotEmpty()) {
+                            try {
+                                val parts = birthDate.split("/")
+                                if (parts.size == 3) {
+                                    LocalDate.of(parts[2].toInt(), parts[1].toInt(), parts[0].toInt())
+                                } else null
+                            } catch (e: Exception) {
+                                null
+                            }
+                        } else null
+
+                        // Save photo if selected
+                        val savedPhotoPath = if (photoPath != null && photoPreview != null) {
+                            PhotoManager.savePhoto(photoPreview!!, memberId)
+                        } else null
+
+                        val startDate = LocalDate.now()
                         val expireDate = startDate.plusMonths(when(packageType) {
                             "1 Tháng" -> 1
                             "3 Tháng" -> 3
@@ -421,6 +632,9 @@ private fun CreateCardDialog(
                         val newMember = Member(
                             memberId = memberId,
                             fullName = fullName,
+                            birthDate = parsedBirthDate,
+                            cccdNumber = if (cccdNumber.isNotEmpty()) cccdNumber else null,
+                            photoPath = savedPhotoPath,
                             startDate = startDate,
                             expireDate = expireDate,
                             packageType = packageType,

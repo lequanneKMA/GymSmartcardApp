@@ -1,4 +1,4 @@
-package app.ui
+package app.ui.shared
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.Button

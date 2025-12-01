@@ -1,4 +1,4 @@
-package app.state
+package app.core.state
 
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -8,8 +8,9 @@ import app.model.CartItem
 import app.model.Member
 import app.model.Role
 import app.model.Transaction
-import app.service.SmartcardService
-import app.service.JCardSimService
+import app.core.smartcard.SmartcardService
+import app.core.smartcard.JCardSimService
+import app.manager.pin.PinVerificationManager
 import java.text.DecimalFormat
 
 private val moneyFormatter = DecimalFormat("#,###")

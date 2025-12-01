@@ -1,4 +1,4 @@
-package app.ui
+package app.ui.staff
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape

@@ -15,8 +15,13 @@ import androidx.compose.ui.window.WindowPlacement
 import androidx.compose.ui.window.WindowState
 import androidx.compose.ui.window.application
 import app.model.Role
-import app.state.AppState
-import app.ui.*
+import app.core.state.AppState
+import app.ui.admin.AdminView
+import app.ui.admin.AdminPasswordDialog
+import app.ui.customer.CustomerView
+import app.ui.staff.StaffView
+import app.ui.shared.RoleSwitcher
+import app.ui.dialog.PinVerificationDialog
 
 // ==================== REUSABLE COMPONENTS ====================
 

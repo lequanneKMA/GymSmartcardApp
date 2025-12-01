@@ -1,4 +1,4 @@
-package app.service
+package app.core.smartcard
 
 import app.model.Member
 import app.security.AESEncryptionManager

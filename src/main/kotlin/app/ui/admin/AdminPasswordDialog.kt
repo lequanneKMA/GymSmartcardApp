@@ -1,4 +1,4 @@
-package app.ui
+package app.ui.admin
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -55,13 +55,6 @@ fun AdminPasswordDialog(
                     fontSize = 14.sp,
                     color = Color(0xFF757575),
                     modifier = Modifier.padding(bottom = 8.dp)
-                )
-
-                Text(
-                    "Mật khẩu mặc định: admin123",
-                    fontSize = 12.sp,
-                    color = Color(0xFF1976D2),
-                    modifier = Modifier.padding(bottom = 12.dp)
                 )
 
                 OutlinedTextField(

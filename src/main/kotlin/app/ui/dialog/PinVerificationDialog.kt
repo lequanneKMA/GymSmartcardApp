@@ -1,4 +1,4 @@
-package app.ui
+package app.ui.dialog
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -10,7 +10,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import app.state.PinVerificationManager
+import app.manager.pin.PinVerificationManager
 
 /**
  * Reusable PIN Verification Dialog

@@ -1,9 +1,9 @@
-package app.state
+package app.manager.pin
 
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import app.service.SmartcardService
+import app.core.smartcard.SmartcardService
 
 /**
  * PIN Verification Manager
