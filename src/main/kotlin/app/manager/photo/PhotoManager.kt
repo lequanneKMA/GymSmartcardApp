@@ -2,6 +2,8 @@ package app.manager.photo
 
 import java.awt.image.BufferedImage
 import java.io.File
+import java.io.ByteArrayOutputStream
+import java.io.ByteArrayInputStream
 import java.nio.file.Files
 import java.nio.file.Paths
 import java.nio.file.StandardCopyOption
@@ -116,5 +118,54 @@ object PhotoManager {
     fun photoExists(photoPath: String?): Boolean {
         if (photoPath == null) return false
         return File(photoPath).exists()
+    }
+    
+    /**
+     * Convert BufferedImage to ByteArray (để lưu encrypted trên thẻ)
+     * @param image BufferedImage
+     * @param format Format (png, jpg)
+     * @return ByteArray hoặc null nếu lỗi
+     */
+    fun imageToByteArray(image: BufferedImage, format: String = "png"): ByteArray? {
+        return try {
+            val baos = ByteArrayOutputStream()
+            ImageIO.write(image, format, baos)
+            baos.toByteArray()
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+    }
+    
+    /**
+     * Convert File to ByteArray (để lưu encrypted trên thẻ)
+     * @param file File ảnh
+     * @return ByteArray hoặc null nếu lỗi
+     */
+    fun fileToByteArray(file: File): ByteArray? {
+        return try {
+            val image = ImageIO.read(file) ?: return null
+            imageToByteArray(image)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+    }
+    
+    /**
+     * Convert ByteArray to BufferedImage (để hiển thị ảnh từ thẻ)
+     * @param bytes ByteArray
+     * @return BufferedImage hoặc null nếu lỗi
+     */
+    fun byteArrayToImage(bytes: ByteArray?): BufferedImage? {
+        if (bytes == null) return null
+        
+        return try {
+            val bais = ByteArrayInputStream(bytes)
+            ImageIO.read(bais)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
     }
 }

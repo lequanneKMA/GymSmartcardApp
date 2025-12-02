@@ -21,9 +21,13 @@ import java.time.format.DateTimeFormatter
 
 @Composable
 fun MemberInfoCard(member: Member) {
-    // Load ảnh nếu có
-    val memberPhoto = remember(member.photoPath) {
-        PhotoManager.loadPhoto(member.photoPath)
+    // Load ảnh ưu tiên từ photoData (on-card), fallback về photoPath
+    val memberPhoto = remember(member.photoData, member.photoPath) {
+        when {
+            member.photoData != null -> PhotoManager.byteArrayToImage(member.photoData)
+            member.photoPath != null -> PhotoManager.loadPhoto(member.photoPath)
+            else -> null
+        }
     }
 
     Card(

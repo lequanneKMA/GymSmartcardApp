@@ -34,6 +34,9 @@ class CardDataEncryptionManager {
                 encryptedPhotoPath = member.photoPath?.let {
                     AESEncryptionManager.encryptString(it, key)
                 },
+                encryptedPhotoData = member.photoData?.let {
+                    AESEncryptionManager.encrypt(it, key) // Encrypt binary photo data
+                },
                 encryptedStartDate = AESEncryptionManager.encryptString(
                     member.startDate.format(dateFormatter), key
                 ),
@@ -64,6 +67,9 @@ class CardDataEncryptionManager {
                 photoPath = encryptedData.encryptedPhotoPath?.let {
                     AESEncryptionManager.decryptString(it, key)
                 },
+                photoData = encryptedData.encryptedPhotoData?.let {
+                    AESEncryptionManager.decrypt(it, key) // Decrypt binary photo data
+                },
                 startDate = LocalDate.parse(
                     AESEncryptionManager.decryptString(encryptedData.encryptedStartDate, key),
                     dateFormatter
@@ -87,7 +93,8 @@ data class EncryptedCardData(
     val encryptedFullName: ByteArray,        // Họ tên (encrypted)
     val encryptedBirthDate: ByteArray?,      // Ngày sinh (encrypted)
     val encryptedCCCD: ByteArray?,           // Số CCCD (encrypted)
-    val encryptedPhotoPath: ByteArray?,      // Đường dẫn ảnh (encrypted)
+    val encryptedPhotoPath: ByteArray?,      // Đường dẫn ảnh (encrypted) - legacy
+    val encryptedPhotoData: ByteArray?,      // Dữ liệu ảnh (encrypted) - LƯU TRÊN THẺ
     val encryptedStartDate: ByteArray,       // Ngày bắt đầu (encrypted)
     val encryptedExpireDate: ByteArray,      // Ngày hết hạn (encrypted)
     val encryptedPackageType: ByteArray,     // Gói tập (encrypted)

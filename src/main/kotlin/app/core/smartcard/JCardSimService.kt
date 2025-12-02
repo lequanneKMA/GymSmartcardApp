@@ -4,6 +4,8 @@ import app.model.Member
 import app.security.AESEncryptionManager
 import app.security.CardDataEncryptionManager
 import app.security.EncryptedCardData
+import app.security.RSASignatureManager
+import app.security.CardIdentity
 import com.licel.jcardsim.smartcardio.CardSimulator
 import javacard.framework.AID
 import java.nio.ByteBuffer
@@ -61,6 +63,12 @@ class JCardSimService : SmartcardService {
     
     // Member info registry - lưu thông tin cơ bản để hiển thị dropdown (không cần decrypt)
     private val memberInfoRegistry = mutableMapOf<String, Member>()
+    
+    // Card identity registry - lưu RSA keypair cho mỗi thẻ (CHỐNG NHÂN BẢN)
+    private val cardIdentityRegistry = mutableMapOf<String, CardIdentity>()
+    
+    // Active challenges - lưu challenge đang chờ verify
+    private val activeChallenges = mutableMapOf<String, ByteArray>()
 
     // Currently inserted card
     private var insertedCard: CardSimulator? = null
@@ -111,7 +119,7 @@ class JCardSimService : SmartcardService {
 
     override fun createCard(member: Member, pin: String): Boolean {
         try {
-            println("\n=== Creating Card with AES-256-GCM Encryption ===")
+            println("\n=== Creating Card with AES-256-GCM + RSA-2048 Signature ===")
             println("Member ID: ${member.memberId}")
             
             // 1. Tạo salt ngẫu nhiên cho thẻ này
@@ -128,13 +136,24 @@ class JCardSimService : SmartcardService {
             encryptedDataRegistry[member.memberId] = encryptedData
             println("Member data encrypted with AES-256-GCM")
             
-            // 4. Lưu member info cho dropdown (không cần decrypt)
+            // 4. Generate RSA keypair cho chống nhân bản thẻ
+            val keyPair = RSASignatureManager.generateKeyPair()
+            val cardIdentity = CardIdentity(
+                memberId = member.memberId,
+                privateKey = keyPair.private,
+                publicKey = keyPair.public
+            )
+            cardIdentityRegistry[member.memberId] = cardIdentity
+            println("RSA-2048 keypair generated (anti-cloning)")
+            println("  Public Key: ${RSASignatureManager.encodePublicKey(keyPair.public).take(50)}...")
+            
+            // 5. Lưu member info cho dropdown (không cần decrypt)
             memberInfoRegistry[member.memberId] = member
             
-            // 5. Lưu PIN đã verify cho session
+            // 6. Lưu PIN đã verify cho session
             verifiedPINRegistry[member.memberId] = pin
             
-            // 6. Create card simulator và set PIN
+            // 7. Create card simulator và set PIN
             val simulator = CardSimulator()
             val aid = AID(APPLET_AID, 0, APPLET_AID.size.toByte())
             simulator.installApplet(aid, app.smartcard.applet.GymCardApplet::class.java)
@@ -154,7 +173,7 @@ class JCardSimService : SmartcardService {
             }
             println("PIN changed successfully")
 
-            // 7. Lưu encrypted data vào applet (giữ nguyên buildDataBytes cho tương thích)
+            // 8. Lưu encrypted data vào applet (giữ nguyên buildDataBytes cho tương thích)
             val dataBytes = buildDataBytes(member)
             if (!setDataInternal(simulator, dataBytes, pin)) {
                 println("Failed to set member data")
@@ -162,7 +181,7 @@ class JCardSimService : SmartcardService {
             }
             println("Encrypted data written to card")
 
-            // 8. Store in registry
+            // 9. Store in registry
             cardRegistry[member.memberId] = simulator
 
             println("Card created successfully")
@@ -551,5 +570,65 @@ class JCardSimService : SmartcardService {
             e.printStackTrace()
             return null
         }
+    }
+    
+    /**
+     * Generate challenge for card authentication (chống nhân bản)
+     * @param memberId Member ID
+     * @return Challenge bytes (32 bytes random)
+     */
+    fun generateChallenge(memberId: String): ByteArray? {
+        val cardIdentity = cardIdentityRegistry[memberId] ?: return null
+        val challenge = RSASignatureManager.generateChallenge()
+        activeChallenges[memberId] = challenge
+        println("Challenge generated for $memberId: ${challenge.joinToString("") { "%02x".format(it) }}")
+        return challenge
+    }
+    
+    /**
+     * Verify challenge response from card (xác thực thẻ thật)
+     * @param memberId Member ID
+     * @param signatureBytes Signature from card (signed with private key)
+     * @return true if valid, false if cloned/invalid
+     */
+    fun verifyChallenge(memberId: String, signatureBytes: ByteArray): Boolean {
+        val challenge = activeChallenges[memberId] ?: return false
+        val cardIdentity = cardIdentityRegistry[memberId] ?: return false
+        
+        val isValid = RSASignatureManager.verify(
+            data = challenge,
+            signatureBytes = signatureBytes,
+            publicKey = cardIdentity.publicKey
+        )
+        
+        if (isValid) {
+            println("✓ Challenge verified - Card is authentic")
+            activeChallenges.remove(memberId) // Clear used challenge
+        } else {
+            println("✗ Challenge verification FAILED - Possible cloned card!")
+        }
+        
+        return isValid
+    }
+    
+    /**
+     * Sign challenge with card's private key (simulation - thực tế chạy on-card)
+     * @param memberId Member ID
+     * @param challenge Challenge to sign
+     * @return Signature bytes
+     */
+    fun signChallenge(memberId: String, challenge: ByteArray): ByteArray? {
+        val cardIdentity = cardIdentityRegistry[memberId] ?: return null
+        return RSASignatureManager.sign(challenge, cardIdentity.privateKey)
+    }
+    
+    /**
+     * Get public key for server storage (anti-cloning system)
+     * @param memberId Member ID
+     * @return Base64 encoded public key
+     */
+    fun getPublicKey(memberId: String): String? {
+        val cardIdentity = cardIdentityRegistry[memberId] ?: return null
+        return RSASignatureManager.encodePublicKey(cardIdentity.publicKey)
     }
 }

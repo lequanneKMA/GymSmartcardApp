@@ -615,7 +615,12 @@ private fun CreateCardDialog(
                             }
                         } else null
 
-                        // Save photo if selected
+                        // Convert photo to ByteArray (LƯU TRÊN THẺ - encrypted)
+                        val photoData = if (photoPreview != null) {
+                            PhotoManager.imageToByteArray(photoPreview!!)
+                        } else null
+                        
+                        // Also save photo path for legacy/UI compatibility
                         val savedPhotoPath = if (photoPath != null && photoPreview != null) {
                             PhotoManager.savePhoto(photoPreview!!, memberId)
                         } else null
@@ -635,6 +640,7 @@ private fun CreateCardDialog(
                             birthDate = parsedBirthDate,
                             cccdNumber = if (cccdNumber.isNotEmpty()) cccdNumber else null,
                             photoPath = savedPhotoPath,
+                            photoData = photoData, // Lưu ảnh encrypted trên thẻ
                             startDate = startDate,
                             expireDate = expireDate,
                             packageType = packageType,
