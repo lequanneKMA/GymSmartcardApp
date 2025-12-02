@@ -19,8 +19,16 @@ dependencies {
     implementation(compose.ui)
     implementation(compose.uiTooling)
     implementation(files("libs/jcard.jar"))
+    
     // Gson for JSON serialization
     implementation("com.google.code.gson:gson:2.10.1")
+    
+    // Firebase Admin SDK
+    implementation("com.google.firebase:firebase-admin:9.2.0")
+    
+    // Coroutines for async operations
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing:1.7.3")
 }
 
 kotlin {

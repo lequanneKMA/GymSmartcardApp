@@ -6,12 +6,15 @@ import app.security.CardDataEncryptionManager
 import app.security.EncryptedCardData
 import app.security.RSASignatureManager
 import app.security.CardIdentity
+import app.service.firebase.FirebaseService
 import com.licel.jcardsim.smartcardio.CardSimulator
 import javacard.framework.AID
+import kotlinx.coroutines.runBlocking
 import java.nio.ByteBuffer
 import java.security.SecureRandom
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
+import java.util.Base64
 import javax.crypto.SecretKey
 import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.PBEKeySpec
@@ -69,6 +72,9 @@ class JCardSimService : SmartcardService {
     
     // Active challenges - lưu challenge đang chờ verify
     private val activeChallenges = mutableMapOf<String, ByteArray>()
+    
+    // Firebase service for cloud backend
+    private val firebaseService = FirebaseService.getInstance()
 
     // Currently inserted card
     private var insertedCard: CardSimulator? = null
@@ -147,6 +153,12 @@ class JCardSimService : SmartcardService {
             println("RSA-2048 keypair generated (anti-cloning)")
             println("  Public Key: ${RSASignatureManager.encodePublicKey(keyPair.public).take(50)}...")
             
+            // 🔥 Store public key to Firebase
+            val publicKeyBase64 = RSASignatureManager.encodePublicKey(keyPair.public)
+            runBlocking {
+                firebaseService.storePublicKey(member.memberId, publicKeyBase64)
+            }
+            
             // 5. Lưu member info cho dropdown (không cần decrypt)
             memberInfoRegistry[member.memberId] = member
             
@@ -197,7 +209,11 @@ class JCardSimService : SmartcardService {
     }
 
     override fun insertCard(memberId: String): Boolean {
-        val simulator = cardRegistry[memberId] ?: return false
+        val simulator = cardRegistry[memberId]
+        if (simulator == null) {
+            println("❌ Card not found in registry: $memberId")
+            return false
+        }
 
         // Eject current card if any
         if (insertedCard != null) {
@@ -207,20 +223,42 @@ class JCardSimService : SmartcardService {
         // Insert new card
         insertedCard = simulator
         insertedMemberId = memberId
+        
+        // Check if PIN is already verified (from previous session)
+        val hasPIN = verifiedPINRegistry.containsKey(memberId)
+        println("✓ Card inserted: $memberId (PIN verified: $hasPIN)")
 
         return true
     }
 
     override fun ejectCard(): Boolean {
-        // Clear verified PIN khi rút thẻ (security)
-        insertedMemberId?.let { memberId ->
-            verifiedPINRegistry.remove(memberId)
-            println("Verified PIN cleared for member: $memberId")
-        }
+        // Keep verified PIN in session for convenience (cắm lại không cần verify PIN)
+        // PIN sẽ được clear khi:
+        // 1. Đóng app
+        // 2. Gọi clearVerifiedPin() explicitly
+        // 3. Change PIN
         
+        println("Card ejected (PIN kept in session for re-insert)")
         insertedCard = null
         insertedMemberId = null
         return true
+    }
+    
+    /**
+     * Clear verified PIN explicitly (for security)
+     * Call this when switching users or on timeout
+     */
+    fun clearVerifiedPin(memberId: String) {
+        verifiedPINRegistry.remove(memberId)
+        println("✓ Verified PIN cleared for $memberId")
+    }
+    
+    /**
+     * Clear all verified PINs (security)
+     */
+    fun clearAllVerifiedPins() {
+        verifiedPINRegistry.clear()
+        println("✓ All verified PINs cleared")
     }
 
     override fun isCardInserted(): Boolean {
@@ -232,18 +270,24 @@ class JCardSimService : SmartcardService {
     }
 
     override fun readCardData(): Member? {
-        val simulator = insertedCard ?: return null
-        val memberId = insertedMemberId ?: return null
+        val simulator = insertedCard
+        val memberId = insertedMemberId
+        
+        if (simulator == null || memberId == null) {
+            println("❌ No card inserted")
+            return null
+        }
 
         try {
             println("\n=== Reading Card Data with AES Decryption ===")
+            println("Member ID: $memberId")
             
             // 1. Lấy salt và encrypted data
             val salt = saltRegistry[memberId]
             val encryptedData = encryptedDataRegistry[memberId]
             
             if (salt == null || encryptedData == null) {
-                println("No encrypted data found for member: $memberId")
+                println("❌ No encrypted data found for member: $memberId")
                 // Fallback: đọc dữ liệu thông thường (backward compatibility)
                 return readCardDataLegacy(simulator, memberId)
             }
@@ -251,20 +295,25 @@ class JCardSimService : SmartcardService {
             // 2. Lấy PIN đã verify
             val verifiedPIN = verifiedPINRegistry[memberId]
             if (verifiedPIN == null) {
-                println("No verified PIN for this session - cannot decrypt")
+                println("❌ No verified PIN for this session")
+                println("💡 Hint: You need to verify PIN first after inserting card")
                 return null
             }
             
+            println("✓ PIN verified in session")
+            
             // 3. Dẫn xuất AES key từ PIN
             val aesKey = AESEncryptionManager.generateKeyFromPIN(verifiedPIN, salt)
-            println("AES key derived from verified PIN")
+            println("✓ AES key derived from verified PIN")
             
             // 4. Giải mã dữ liệu
             val member = CardDataEncryptionManager.decryptMemberData(encryptedData, aesKey)
             println("Member data decrypted successfully")
             println("Member: ${member.fullName}")
+            println("Balance: ${member.balance} đ")
             println("Birth Date: ${member.birthDate}")
             println("CCCD: ${member.cccdNumber}")
+            println("Photo Data: ${if (member.photoData != null) "${member.photoData!!.size} bytes" else "null"}")
             println("=== Read Complete ===")
             
             return member
@@ -334,9 +383,13 @@ class JCardSimService : SmartcardService {
             val success = checkSuccess(response)
             
             if (success) {
+                println("✅ Balance updated: $newBalance đ")
+                
                 // Update memberInfoRegistry
                 memberInfoRegistry[memberId]?.let { member ->
-                    memberInfoRegistry[memberId] = member.copy(balance = newBalance)
+                    val updatedMember = member.copy(balance = newBalance)
+                    memberInfoRegistry[memberId] = updatedMember
+                    println("  ✓ memberInfoRegistry updated")
                 }
                 
                 // Update encryptedDataRegistry
@@ -347,7 +400,19 @@ class JCardSimService : SmartcardService {
                     if (updatedMember != null) {
                         val encryptedData = CardDataEncryptionManager.encryptMemberData(updatedMember, aesKey)
                         encryptedDataRegistry[memberId] = encryptedData
+                        println("  ✓ encryptedDataRegistry updated")
                     }
+                }
+                
+                // 🔥 Log transaction to Firebase
+                runBlocking {
+                    firebaseService.logTransaction(
+                        memberId = memberId,
+                        type = "balance_update",
+                        amount = newBalance,
+                        staffId = "SYSTEM",
+                        verified = true
+                    )
                 }
             }
             
@@ -581,6 +646,12 @@ class JCardSimService : SmartcardService {
         val cardIdentity = cardIdentityRegistry[memberId] ?: return null
         val challenge = RSASignatureManager.generateChallenge()
         activeChallenges[memberId] = challenge
+        
+        // 🔥 Store challenge in Firebase
+        runBlocking {
+            firebaseService.generateChallenge(memberId, challenge)
+        }
+        
         println("Challenge generated for $memberId: ${challenge.joinToString("") { "%02x".format(it) }}")
         return challenge
     }
@@ -604,6 +675,11 @@ class JCardSimService : SmartcardService {
         if (isValid) {
             println("✓ Challenge verified - Card is authentic")
             activeChallenges.remove(memberId) // Clear used challenge
+            
+            // 🔥 Mark challenge as used in Firebase
+            runBlocking {
+                firebaseService.markChallengeUsed(memberId)
+            }
         } else {
             println("✗ Challenge verification FAILED - Possible cloned card!")
         }
@@ -630,5 +706,126 @@ class JCardSimService : SmartcardService {
     fun getPublicKey(memberId: String): String? {
         val cardIdentity = cardIdentityRegistry[memberId] ?: return null
         return RSASignatureManager.encodePublicKey(cardIdentity.publicKey)
+    }
+    
+    /**
+     * 🔥 Verify card với Firebase (complete challenge-response)
+     */
+    suspend fun verifyCardWithFirebase(memberId: String): Boolean {
+        // 1. Generate challenge
+        val challenge = generateChallenge(memberId) ?: return false
+        
+        // 2. Card signs challenge
+        val signature = signChallenge(memberId, challenge) ?: return false
+        
+        // 3. Verify signature locally
+        val isValid = verifyChallenge(memberId, signature)
+        
+        if (isValid) {
+            println("✅ [Firebase] Card authenticated successfully")
+        } else {
+            println("❌ [Firebase] Card authentication FAILED")
+        }
+        
+        return isValid
+    }
+    
+    /**
+     * 🔥 Backup encrypted card data to Firebase
+     */
+    suspend fun backupToFirebase(memberId: String): Boolean {
+        val encryptedData = encryptedDataRegistry[memberId] ?: return false
+        
+        // Convert encrypted data to Base64 map
+        val encryptedDataMap = mapOf(
+            "fullName" to Base64.getEncoder().encodeToString(encryptedData.encryptedFullName),
+            "birthDate" to (encryptedData.encryptedBirthDate?.let { Base64.getEncoder().encodeToString(it) } ?: ""),
+            "cccd" to (encryptedData.encryptedCCCD?.let { Base64.getEncoder().encodeToString(it) } ?: ""),
+            "photoPath" to (encryptedData.encryptedPhotoPath?.let { Base64.getEncoder().encodeToString(it) } ?: ""),
+            "photoData" to (encryptedData.encryptedPhotoData?.let { Base64.getEncoder().encodeToString(it) } ?: ""),
+            "startDate" to Base64.getEncoder().encodeToString(encryptedData.encryptedStartDate),
+            "expireDate" to Base64.getEncoder().encodeToString(encryptedData.encryptedExpireDate),
+            "packageType" to Base64.getEncoder().encodeToString(encryptedData.encryptedPackageType),
+            "balance" to Base64.getEncoder().encodeToString(encryptedData.encryptedBalance)
+        )
+        
+        return firebaseService.backupCardData(memberId, encryptedDataMap)
+    }
+    
+    /**
+     * 🔍 Debug: Log toàn bộ thông tin thẻ
+     */
+    fun logCardInfo(memberId: String) {
+        println("\n=== 🔍 CARD INFO DEBUG ===")
+        println("Member ID: $memberId")
+        
+        // Card exists?
+        val card = cardRegistry[memberId]
+        println("Card exists in registry: ${card != null}")
+        
+        // Salt
+        val salt = saltRegistry[memberId]
+        println("Salt: ${salt?.joinToString("") { "%02x".format(it) } ?: "NOT FOUND"}")
+        
+        // Encrypted data
+        val encryptedData = encryptedDataRegistry[memberId]
+        println("Encrypted data exists: ${encryptedData != null}")
+        
+        // Verified PIN
+        val verifiedPIN = verifiedPINRegistry[memberId]
+        println("Verified PIN exists: ${verifiedPIN != null}")
+        
+        // Member info (unencrypted copy)
+        val memberInfo = memberInfoRegistry[memberId]
+        println("\n📋 Member Info (unencrypted registry):")
+        if (memberInfo != null) {
+            println("  Full Name: ${memberInfo.fullName}")
+            println("  Balance: ${memberInfo.balance} đ")
+            println("  Birth Date: ${memberInfo.birthDate}")
+            println("  CCCD: ${memberInfo.cccdNumber}")
+            println("  Photo Path: ${memberInfo.photoPath}")
+            println("  Photo Data: ${if (memberInfo.photoData != null) "${memberInfo.photoData!!.size} bytes" else "null"}")
+            println("  Package: ${memberInfo.packageType}")
+            println("  Start: ${memberInfo.startDate}")
+            println("  Expire: ${memberInfo.expireDate}")
+        } else {
+            println("  NOT FOUND")
+        }
+        
+        // Encrypted data details
+        if (encryptedData != null && verifiedPIN != null && salt != null) {
+            try {
+                val aesKey = AESEncryptionManager.generateKeyFromPIN(verifiedPIN, salt)
+                val decryptedMember = CardDataEncryptionManager.decryptMemberData(encryptedData, aesKey)
+                println("\n🔓 Decrypted Data (from card):")
+                println("  Full Name: ${decryptedMember.fullName}")
+                println("  Balance: ${decryptedMember.balance} đ")
+                println("  Birth Date: ${decryptedMember.birthDate}")
+                println("  CCCD: ${decryptedMember.cccdNumber}")
+                println("  Photo Path: ${decryptedMember.photoPath}")
+                println("  Photo Data: ${if (decryptedMember.photoData != null) "${decryptedMember.photoData!!.size} bytes" else "null"}")
+                println("  Package: ${decryptedMember.packageType}")
+                println("  Start: ${decryptedMember.startDate}")
+                println("  Expire: ${decryptedMember.expireDate}")
+            } catch (e: Exception) {
+                println("\n❌ Failed to decrypt: ${e.message}")
+            }
+        }
+        
+        // RSA Identity
+        val cardIdentity = cardIdentityRegistry[memberId]
+        println("\n🔐 RSA Identity:")
+        println("  Keypair exists: ${cardIdentity != null}")
+        if (cardIdentity != null) {
+            val publicKeyBase64 = RSASignatureManager.encodePublicKey(cardIdentity.publicKey)
+            println("  Public Key: ${publicKeyBase64.take(50)}...")
+        }
+        
+        // Inserted card
+        println("\n💳 Inserted Card:")
+        println("  Inserted: ${insertedCard != null}")
+        println("  Inserted Member ID: ${insertedMemberId ?: "NONE"}")
+        
+        println("=== 🔍 END DEBUG ===\n")
     }
 }

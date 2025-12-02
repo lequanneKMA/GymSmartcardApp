@@ -22,6 +22,8 @@ import app.ui.customer.CustomerView
 import app.ui.staff.StaffView
 import app.ui.shared.RoleSwitcher
 import app.ui.dialog.PinVerificationDialog
+import app.service.firebase.FirebaseService
+import java.io.File
 
 // ==================== REUSABLE COMPONENTS ====================
 
@@ -378,6 +380,22 @@ private fun MainContent(state: AppState) {
 // ==================== MAIN APPLICATION ====================
 
 fun main() = application {
+    // 🔥 Initialize Firebase
+    val firebaseCredPath = "firebase-credentials.json"
+    val credFile = File(firebaseCredPath)
+    
+    if (credFile.exists()) {
+        println("🔥 Initializing Firebase...")
+        FirebaseService.getInstance().initialize(firebaseCredPath)
+    } else {
+        println("⚠️ Firebase credentials not found at: $firebaseCredPath")
+        println("⚠️ Running without Firebase backend (local mode only)")
+        println("📝 To enable Firebase:")
+        println("   1. Go to Firebase Console > Project Settings > Service Accounts")
+        println("   2. Generate new private key (JSON)")
+        println("   3. Save as 'firebase-credentials.json' in project root")
+    }
+    
     val state = remember { AppState() }
     var showCustomerWindow by remember { mutableStateOf(false) }
 

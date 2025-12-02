@@ -1,6 +1,18 @@
+# Firebase credentials (SENSITIVE - DO NOT COMMIT)
+firebase-credentials.json
+google-services.json
+
+# IDE
 .idea/
 .gradle/
 build/
 bin/
 out/
 *.iml
+
+# Photos (local storage)
+photos/
+
+# OS
+.DS_Store
+Thumbs.db
